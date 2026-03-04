@@ -11,7 +11,14 @@ import TemplateSelector from './components/TemplateSelector'
 
 function AppShell() {
     const toast = useToast()
-    const [user, setUser] = useState(null)
+    const [user, setUser] = useState(() => {
+        try {
+            const saved = sessionStorage.getItem('flicker_user')
+            return saved ? JSON.parse(saved) : null
+        } catch {
+            return null
+        }
+    })
     const [view, setView] = useState('dashboard')
     const [selectedPlanId, setSelectedPlanId] = useState(null)
     const [plans, setPlans] = useState([])
@@ -37,12 +44,14 @@ function AppShell() {
     useEffect(() => { fetchPlans() }, [user])
 
     const handleLoginSuccess = (userData) => {
+        sessionStorage.setItem('flicker_user', JSON.stringify(userData))
         setUser(userData)
         setView('dashboard')
         toast.success(`Welcome back, ${userData.full_name}!`)
     }
 
     const handleLogout = () => {
+        sessionStorage.removeItem('flicker_user')
         setUser(null)
         setPlans([])
         setView('dashboard')
