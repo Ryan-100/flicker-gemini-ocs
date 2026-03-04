@@ -2,11 +2,12 @@ import { useState, useMemo } from 'react'
 import { api } from '../api'
 import {
     Save, X, Target as TargetIcon, Settings, Wind, Camera, Box,
-    PlusCircle, FlaskConical, AlertTriangle, CheckCircle2, Info
+    PlusCircle, FlaskConical, AlertTriangle, CheckCircle2, Info,
+    Calendar, ChevronRight, ChevronLeft, ClipboardList, BookOpen, MessageSquare
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-/* ─── Coordinate validators ─── */
+/* ─── Coordinate validators (Diagram UC-1 step 6) ─── */
 const RA_RE  = /^\d{2}:\d{2}:\d{2}(\.\d)?$/
 const DEC_RE = /^[+-]?\d{2}:\d{2}:\d{2}(\.\d)?$/
 
@@ -89,9 +90,73 @@ function CancelConfirmDialog({ onConfirm, onCancel }) {
     )
 }
 
+/* ─── Plan Review Summary (Diagram UC-1 steps 17-18: Astronomer reviews + comprehensive validation) ─── */
+function PlanReviewSummary({ form, totalMin, isLongObs }) {
+    const ReviewRow = ({ label, value, warn }) => (
+        <div className="flex justify-between items-center py-1.5 border-b border-white/5 last:border-0">
+            <span className="text-slate-500 text-xs">{label}</span>
+            <span className={`text-xs font-semibold font-mono ${warn ? 'text-amber-400' : 'text-slate-200'}`}>{value}</span>
+        </div>
+    )
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-indigo-950/50 border border-indigo-500/30 rounded-2xl p-6 mt-6"
+        >
+            <div className="flex items-center space-x-2 mb-4">
+                <ClipboardList className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-sm font-bold text-indigo-300 uppercase tracking-widest">Plan Review Summary</h4>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">Review the complete science plan before saving. All required fields have been validated.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <p className="text-[10px] uppercase tracking-widest text-indigo-400/70 font-bold mb-2">Target</p>
+                    <ReviewRow label="Object" value={form.target.name || '—'} />
+                    <ReviewRow label="Type" value={form.target.object_type} />
+                    <ReviewRow label="RA" value={form.target.ra || '—'} />
+                    <ReviewRow label="Dec" value={form.target.dec || '—'} />
+                    <ReviewRow label="Magnitude" value={form.target.magnitude} />
+                </div>
+                <div>
+                    <p className="text-[10px] uppercase tracking-widest text-indigo-400/70 font-bold mb-2">Instrument & Conditions</p>
+                    <ReviewRow label="Instrument" value={form.instrument} />
+                    <ReviewRow label="Seeing" value={`${form.conditions.seeing} arcsec`} />
+                    <ReviewRow label="Cloud Cover" value={`${form.conditions.cloud_cover}%`} />
+                    <ReviewRow label="Water Vapor" value={`${form.conditions.water_vapor}%`} />
+                </div>
+                <div>
+                    <p className="text-[10px] uppercase tracking-widest text-indigo-400/70 font-bold mb-2">Exposure</p>
+                    <ReviewRow label="Exp. Time" value={`${form.exposure.exp_time}s`} />
+                    <ReviewRow label="Num Exposures" value={form.exposure.num_exposures} />
+                    <ReviewRow label="Total Duration" value={`${totalMin} min`} warn={isLongObs} />
+                    <ReviewRow label="Filters" value={form.exposure.filters.join(', ') || '—'} />
+                </div>
+                <div>
+                    <p className="text-[10px] uppercase tracking-widest text-indigo-400/70 font-bold mb-2">Data Specifications</p>
+                    <ReviewRow label="File Type" value={form.data_proc.file_type} />
+                    <ReviewRow label="Quality" value={form.data_proc.file_quality} />
+                    <ReviewRow label="Color Mode" value={form.data_proc.image_proc.color_mode} />
+                    {form.scheduling?.date_start && (
+                        <ReviewRow label="Obs. Window" value={`${form.scheduling.date_start} → ${form.scheduling.date_end || 'open'}`} />
+                    )}
+                </div>
+            </div>
+            {isLongObs && (
+                <div className="mt-4 flex items-center space-x-2 bg-amber-900/20 border border-amber-500/30 rounded-xl px-4 py-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <p className="text-xs text-amber-300">Long observation warning: total duration exceeds 60 minutes. Scheduling constraints may apply.</p>
+                </div>
+            )}
+        </motion.div>
+    )
+}
+
 /* ─── Main Component ─── */
-function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
-    const [form, setForm] = useState({
+// Diagram UC-1 step 3a4: initialValues pre-filled from template when creating from template
+// Diagram UC-3 15b: revisePlanId is set when astronomer responds to clarification
+function PlanForm({ astronomerId, onSuccess, onCancel, toast, initialValues = null, revisePlanId = null }) {
+    const DEFAULT_FORM = {
         astronomer_id: astronomerId || '',
         target: { name: '', ra: '', dec: '', magnitude: 5.0, object_type: 'Galaxy' },
         instrument: 'GMOS-N',
@@ -101,17 +166,42 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
             file_type: 'FITS',
             file_quality: 'High',
             image_proc: { color_mode: 'B&W', contrast: 50, brightness: 50, saturation: 50 }
+        },
+        scheduling: { date_start: '', date_end: '', priority: 1, time_window_notes: '' }
+    }
+
+    // Diagram UC-1 step 3a3: merge template values over defaults, preserving astronomer_id
+    const buildInitialForm = () => {
+        if (!initialValues) return DEFAULT_FORM
+        return {
+            ...DEFAULT_FORM,
+            ...initialValues,
+            astronomer_id: astronomerId || '',
+            // Always start with empty target so astronomer fills in step 5
+            target: { ...DEFAULT_FORM.target, ...(initialValues.target || {}) },
+            conditions: { ...DEFAULT_FORM.conditions, ...(initialValues.conditions || {}) },
+            exposure: { ...DEFAULT_FORM.exposure, ...(initialValues.exposure || {}) },
+            data_proc: {
+                ...DEFAULT_FORM.data_proc,
+                ...(initialValues.data_proc || {}),
+                image_proc: { ...DEFAULT_FORM.data_proc.image_proc, ...(initialValues.data_proc?.image_proc || {}) }
+            },
+            scheduling: { ...DEFAULT_FORM.scheduling, ...(initialValues.scheduling || {}) },
         }
-    })
+    }
+
+    const [form, setForm] = useState(buildInitialForm)
 
     const [errors, setErrors] = useState({})
     const [loading, setLoading] = useState(false)
     const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+    // Diagram UC-1 steps 17-18: show review summary before saving
+    const [showReview, setShowReview] = useState(false)
 
     /* ─── Derived values ─── */
     const totalSec = form.exposure.exp_time * form.exposure.num_exposures
     const totalMin = (totalSec / 60).toFixed(1)
-    const isLongObs = totalSec > 3600
+    const isLongObs = totalSec > 3600  // Diagram UC-1 step 12a: exceeds recommended limits
 
     const isDirty = useMemo(() => form.target.name !== '' || form.target.ra !== '' || form.target.dec !== '', [form])
 
@@ -121,6 +211,7 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
     const setExp    = (patch) => setForm(f => ({ ...f, exposure: { ...f.exposure, ...patch } }))
     const setData   = (patch) => setForm(f => ({ ...f, data_proc: { ...f.data_proc, ...patch } }))
     const setImg    = (patch) => setForm(f => ({ ...f, data_proc: { ...f.data_proc, image_proc: { ...f.data_proc.image_proc, ...patch } } }))
+    const setSched  = (patch) => setForm(f => ({ ...f, scheduling: { ...f.scheduling, ...patch } }))
 
     const toggleFilter = (f) => {
         const cur = form.exposure.filters
@@ -134,22 +225,42 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
         setErrors(prev => ({ ...prev, [field]: err }))
     }
 
-    const handleSubmit = async (e) => {
+    // Diagram UC-1 step 17: Astronomer reviews complete plan summary
+    const handleReviewPlan = (e) => {
         e.preventDefault()
-
-        // Final inline validation before API call
         const raErr  = validateRA(form.target.ra)
         const decErr = validateDEC(form.target.dec)
         if (raErr || decErr) {
             setErrors(prev => ({ ...prev, ra: raErr, dec: decErr }))
-            toast.error('Please fix coordinate format errors before saving.')
+            toast.error('Please fix coordinate format errors before reviewing.')
             return
         }
+        if (form.exposure.filters.length === 0) {
+            toast.error('Please select at least one filter.')
+            return
+        }
+        setShowReview(true)
+    }
 
+    // Diagram UC-1 steps 19-21 / UC-3 15b: save as Draft (new) OR save as Revised (existing)
+    const handleSubmit = async () => {
         setLoading(true)
         try {
-            const payload = { ...form, astronomer_id: astronomerId }
-            await api.createPlan(payload)
+            const payload = {
+                ...form,
+                astronomer_id: astronomerId,
+                // Only include scheduling if dates/notes are provided (it's optional)
+                scheduling: (form.scheduling.date_start || form.scheduling.date_end || form.scheduling.time_window_notes)
+                    ? form.scheduling
+                    : null
+            }
+            if (revisePlanId) {
+                // Diagram UC-3 15b: revise existing plan in response to clarification
+                await api.revisePlan(revisePlanId, payload)
+                toast.success('Plan revised and saved. You can now re-submit for validation.')
+            } else {
+                await api.createPlan(payload)
+            }
             onSuccess()
         } catch (err) {
             const detail = err.response?.data?.detail
@@ -158,8 +269,9 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                 : Array.isArray(detail)
                     ? detail.map(d => `${d.loc?.slice(-1)[0]}: ${d.msg}`).join(' | ')
                     : err.response?.data?.message || err.response?.data?.error
-                        || 'Failed to create plan. Check all fields and try again.'
+                        || (revisePlanId ? 'Failed to revise plan.' : 'Failed to create plan.') + ' Check all fields and try again.'
             toast.error(msg)
+            setShowReview(false)
         } finally {
             setLoading(false)
         }
@@ -194,9 +306,38 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="bg-slate-900/60 backdrop-blur border border-white/8 border-t-0 rounded-2xl rounded-t-none p-10 space-y-10">
+                <form onSubmit={handleReviewPlan} className="bg-slate-900/60 backdrop-blur border border-white/8 border-t-0 rounded-2xl rounded-t-none p-10 space-y-10">
 
-                    {/* ── Step 1: Target Information ── */}
+                    {/* Revision mode banner — shown when astronomer responds to clarification (UC-3 15b) */}
+                {revisePlanId && (
+                    <div className="flex items-start space-x-3 mb-8 bg-violet-950/60 border border-violet-500/30 rounded-2xl px-5 py-4">
+                        <MessageSquare className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                            <p className="text-sm font-bold text-violet-300">Responding to Clarification Request</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Update any fields the Science Observer questioned. Saving will change the plan status to <span className="text-amber-300 font-semibold">Revised</span> — then re-submit for validation.</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Template banner: shown when form was pre-filled from a template (UC-1 step 3a3-3a4) */}
+                {!revisePlanId && initialValues && (
+                    <div className="flex items-center space-x-3 mb-8 bg-indigo-950/60 border border-indigo-500/30 rounded-2xl px-5 py-4">
+                        <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
+                        <div className="flex-1">
+                            <p className="text-sm font-bold text-indigo-300">Template Applied</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Form has been pre-filled with template values. Review and update all fields — target coordinates are required.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="text-xs text-indigo-400/60 hover:text-indigo-300 transition font-semibold underline underline-offset-2 shrink-0"
+                        >
+                            Change template
+                        </button>
+                    </div>
+                )}
+
+                {/* ── Step 1: Target Information ── */}
                     <section>
                         <SectionTitle icon={TargetIcon} title="Target Information" step="1" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -219,6 +360,7 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                                 </select>
                             </Field>
 
+                            {/* Diagram UC-1 step 6: System validates coordinate format */}
                             <Field label="Right Ascension" hint="HH:MM:SS.S" error={errors.ra}>
                                 <input
                                     type="text" required
@@ -253,9 +395,14 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
 
                     <hr className="border-white/5" />
 
-                    {/* ── Step 2: Instrument ── */}
+                    {/* ── Step 2: Instrument Selection (Diagram UC-1 steps 7-8) ── */}
                     <section>
                         <SectionTitle icon={FlaskConical} title="Instrument Selection" step="2" />
+                        {/* Diagram UC-1 step 8: System validates compatibility */}
+                        <div className="mb-3 flex items-start space-x-2 text-xs text-slate-500">
+                            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>All listed instruments are confirmed available. The system validates compatibility with your target and conditions.</span>
+                        </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             {INSTRUMENTS.map(inst => (
                                 <button
@@ -274,31 +421,41 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
 
                     <hr className="border-white/5" />
 
-                    {/* ── Step 3: Observing Conditions ── */}
+                    {/* ── Step 3: Observing Conditions (Diagram UC-1 steps 9-10, NO Sky Condition) ── */}
                     <section>
                         <SectionTitle icon={Wind} title="Observing Conditions" step="3" />
+                        {/* Diagram UC-1 step 10: System validates conditions against instrument limits */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <Field label="Seeing (arcsec)" error="">
+                            <Field label="Seeing (arcsec)" hint="0.3 – 3.0" error="">
                                 <input type="number" step="0.1" min="0.3" max="3.0" className={INPUT}
                                     value={form.conditions.seeing}
                                     onChange={e => setCond({ seeing: parseFloat(e.target.value) })} />
+                                {(form.conditions.seeing < 0.3 || form.conditions.seeing > 3.0) && (
+                                    <p className="mt-1 text-xs text-red-400 flex items-center space-x-1">
+                                        <AlertTriangle className="w-3 h-3" /><span>Must be between 0.3 and 3.0 arcsec (instrument limit).</span>
+                                    </p>
+                                )}
                             </Field>
-                            <Field label="Cloud Cover (%)" error="">
+                            <Field label="Cloud Cover (%)" hint="0 – 100" error="">
                                 <input type="number" min="0" max="100" className={INPUT}
                                     value={form.conditions.cloud_cover}
                                     onChange={e => setCond({ cloud_cover: parseInt(e.target.value) })} />
                             </Field>
-                            <Field label="Water Vapor (%)" error="">
+                            <Field label="Water Vapor (%)" hint="0 – 100" error="">
                                 <input type="number" min="0" max="100" className={INPUT}
                                     value={form.conditions.water_vapor}
                                     onChange={e => setCond({ water_vapor: parseInt(e.target.value) })} />
                             </Field>
                         </div>
+                        <div className="mt-2 flex items-start space-x-2 text-xs text-slate-600">
+                            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>No sky condition required (per Gemini OCS professor specification).</span>
+                        </div>
                     </section>
 
                     <hr className="border-white/5" />
 
-                    {/* ── Step 4: Exposure Settings ── */}
+                    {/* ── Step 4: Exposure Settings (Diagram UC-1 steps 11-12) ── */}
                     <section>
                         <SectionTitle icon={Settings} title="Exposure Settings" step="4" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -314,7 +471,7 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                             </Field>
                         </div>
 
-                        {/* Live total time indicator */}
+                        {/* Diagram UC-1 step 12: System calculates estimated observation duration */}
                         <div className={`flex items-center space-x-3 p-4 rounded-xl border ${isLongObs ? 'bg-amber-900/20 border-amber-500/30' : 'bg-slate-800/40 border-white/5'}`}>
                             {isLongObs
                                 ? <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
@@ -324,6 +481,7 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                                 <div className={`text-sm font-bold ${isLongObs ? 'text-amber-300' : 'text-slate-200'}`}>
                                     Total Observation Time: {totalMin} min ({totalSec.toLocaleString()} s)
                                 </div>
+                                {/* Diagram UC-1 step 12a: warning for long observation */}
                                 {isLongObs && (
                                     <div className="text-xs text-amber-400/80 mt-0.5">
                                         ⚠ Long observation exceeds 60 min. Ensure telescope scheduling constraints allow this.
@@ -359,7 +517,7 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
 
                     <hr className="border-white/5" />
 
-                    {/* ── Step 5: Data Processing ── */}
+                    {/* ── Step 5: Data Processing (Diagram UC-1 steps 13-14) ── */}
                     <section>
                         <SectionTitle icon={Camera} title="Data Specifications (Gemini Standard)" step="5" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -424,6 +582,63 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                         </div>
                     </section>
 
+                    <hr className="border-white/5" />
+
+                    {/* ── Step 6: Scheduling Constraints (Diagram UC-1 steps 15-16, OPTIONAL) ── */}
+                    <section>
+                        <SectionTitle icon={Calendar} title="Scheduling Constraints (Optional)" step="6" />
+                        <p className="text-xs text-slate-500 mb-6 -mt-2">Specify preferred observation date range and priority. Leave blank if no scheduling constraints are required.</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <Field label="Earliest Observation Date" error="">
+                                <input
+                                    type="date"
+                                    className={INPUT}
+                                    value={form.scheduling.date_start}
+                                    onChange={e => setSched({ date_start: e.target.value })}
+                                />
+                            </Field>
+                            <Field label="Latest Observation Date" error="">
+                                <input
+                                    type="date"
+                                    className={INPUT}
+                                    value={form.scheduling.date_end}
+                                    min={form.scheduling.date_start || undefined}
+                                    onChange={e => setSched({ date_end: e.target.value })}
+                                />
+                            </Field>
+                            {/* Diagram UC-1 step 16: System validates constraints against telescope scheduling rules */}
+                            {form.scheduling.date_start && form.scheduling.date_end && form.scheduling.date_end < form.scheduling.date_start && (
+                                <div className="md:col-span-2 flex items-center space-x-2 text-xs text-red-400 bg-red-900/10 border border-red-500/30 rounded-xl px-4 py-3">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>End date must be on or after start date.</span>
+                                </div>
+                            )}
+                            <Field label="Priority" error="">
+                                <select className={SELECT}
+                                    value={form.scheduling.priority}
+                                    onChange={e => setSched({ priority: parseInt(e.target.value) })}>
+                                    <option value={1}>1 — High Priority</option>
+                                    <option value={2}>2 — Medium Priority</option>
+                                    <option value={3}>3 — Low Priority</option>
+                                </select>
+                            </Field>
+                            <Field label="Time Window Notes" error="">
+                                <input
+                                    type="text"
+                                    className={INPUT}
+                                    placeholder="e.g. Must observe before 03:00 UTC"
+                                    value={form.scheduling.time_window_notes}
+                                    onChange={e => setSched({ time_window_notes: e.target.value })}
+                                />
+                            </Field>
+                        </div>
+                    </section>
+
+                    {/* ── Diagram UC-1 steps 17-18: Review complete plan summary + comprehensive validation ── */}
+                    {showReview && (
+                        <PlanReviewSummary form={form} totalMin={totalMin} isLongObs={isLongObs} />
+                    )}
+
                     {/* ── Footer ── */}
                     <footer className="flex justify-end pt-6 border-t border-white/5 space-x-4">
                         <button
@@ -433,16 +648,32 @@ function PlanForm({ astronomerId, onSuccess, onCancel, toast }) {
                         >
                             Cancel
                         </button>
-                        <button
-                            type="submit"
-                            disabled={loading || form.exposure.filters.length === 0}
-                            className="flex items-center space-x-2 px-10 py-3 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl shadow-indigo-900/30 transition disabled:opacity-40 text-sm"
-                        >
-                            {loading
-                                ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /><span>Saving...</span></>
-                                : <><Save className="w-4 h-4" /><span>Save as Draft</span></>
-                            }
-                        </button>
+
+                        {!showReview ? (
+                            // Diagram UC-1 step 17: "Review Complete Plan Summary" button
+                            <button
+                                type="submit"
+                                disabled={form.exposure.filters.length === 0}
+                                className="flex items-center space-x-2 px-10 py-3 rounded-xl font-bold bg-slate-700 hover:bg-slate-600 text-white shadow-xl transition disabled:opacity-40 text-sm border border-white/10"
+                            >
+                                <ClipboardList className="w-4 h-4" />
+                                <span>Review Plan</span>
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        ) : (
+                            // Diagram UC-1 step 19: Astronomer saves plan as draft
+                            <button
+                                type="button"
+                                disabled={loading || form.exposure.filters.length === 0}
+                                onClick={handleSubmit}
+                                className="flex items-center space-x-2 px-10 py-3 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xl shadow-indigo-900/30 transition disabled:opacity-40 text-sm"
+                            >
+                                {loading
+                                    ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /><span>Saving...</span></>
+                                    : <><Save className="w-4 h-4" /><span>Save as Draft</span></>
+                                }
+                            </button>
+                        )}
                     </footer>
                 </form>
             </div>

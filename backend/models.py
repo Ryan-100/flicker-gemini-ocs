@@ -15,6 +15,7 @@ class PlanStatus(str, Enum):
     REVISED = "Revised"
     APPROVED = "Approved"
     REJECTED = "Rejected"
+    CONVERTED_TO_PROGRAM = "Converted to Program"  # Diagram UC-3 step 22
 
 class RejectionCategory(str, Enum):
     TECHNICAL = "Technical Infeasibility"
@@ -55,6 +56,13 @@ class DataProcessingReqs(BaseModel):
     file_quality: str = Field(default="High")
     image_proc: ImageProcessingSpec
 
+# Diagram UC-1 step 15: Optional scheduling constraints section
+class SchedulingConstraints(BaseModel):
+    date_start: Optional[str] = None   # Earliest observation date (YYYY-MM-DD)
+    date_end: Optional[str] = None     # Latest observation date (YYYY-MM-DD)
+    priority: int = Field(default=1)   # 1=High, 2=Medium, 3=Low
+    time_window_notes: Optional[str] = None  # Free-text time window description
+
 class SciencePlan(BaseModel):
     id: Optional[str] = None
     astronomer_id: str
@@ -68,6 +76,10 @@ class SciencePlan(BaseModel):
     submission_notes: Optional[str] = None
     rejection_category: Optional[RejectionCategory] = None
     rejection_reason: Optional[str] = None
+    # Diagram UC-1 step 15: optional scheduling constraints
+    scheduling: Optional[SchedulingConstraints] = None
+    # Diagram UC-3 15b: clarification questions from Science Observer
+    clarification_questions: Optional[str] = None
 
     @validator('rejection_reason')
     def validate_rejection_reason(cls, v, values):
@@ -91,3 +103,7 @@ class SciencePlanDB(Base):
     submission_notes = Column(String, nullable=True)
     rejection_category = Column(SQLEnum(RejectionCategory), nullable=True)
     rejection_reason = Column(String, nullable=True)
+    # Diagram UC-1 step 15: scheduling constraints stored as JSON
+    scheduling = Column(JSON, nullable=True)
+    # Diagram UC-3 15b: clarification questions
+    clarification_questions = Column(String, nullable=True)

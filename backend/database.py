@@ -15,13 +15,20 @@ Base.metadata.create_all(bind=engine)
 def run_migrations():
     """Add any missing columns to existing tables (safe to run repeatedly)."""
     with engine.connect() as conn:
-        # Check if 'instrument' column exists
         result = conn.execute(
             text("PRAGMA table_info(science_plans)")
         )
         columns = {row[1] for row in result}
         if 'instrument' not in columns:
             conn.execute(text("ALTER TABLE science_plans ADD COLUMN instrument VARCHAR"))
+            conn.commit()
+        # Diagram UC-1 step 15: scheduling constraints column
+        if 'scheduling' not in columns:
+            conn.execute(text("ALTER TABLE science_plans ADD COLUMN scheduling JSON"))
+            conn.commit()
+        # Diagram UC-3 15b: clarification questions column
+        if 'clarification_questions' not in columns:
+            conn.execute(text("ALTER TABLE science_plans ADD COLUMN clarification_questions VARCHAR"))
             conn.commit()
 
 run_migrations()
@@ -51,7 +58,11 @@ class PlanStore:
                 created_at=plan.created_at,
                 submission_notes=plan.submission_notes,
                 rejection_category=plan.rejection_category,
-                rejection_reason=plan.rejection_reason
+                rejection_reason=plan.rejection_reason,
+                # Diagram UC-1 step 15: persist scheduling constraints
+                scheduling=plan.scheduling.dict() if plan.scheduling else None,
+                # Diagram UC-3 15b: persist clarification questions
+                clarification_questions=plan.clarification_questions
             )
             db.merge(db_plan)
             db.commit()
@@ -76,7 +87,9 @@ class PlanStore:
                     "created_at": db_plan.created_at,
                     "submission_notes": db_plan.submission_notes,
                     "rejection_category": db_plan.rejection_category,
-                    "rejection_reason": db_plan.rejection_reason
+                    "rejection_reason": db_plan.rejection_reason,
+                    "scheduling": db_plan.scheduling,
+                    "clarification_questions": db_plan.clarification_questions,
                 })
             return None
         finally:
@@ -99,7 +112,9 @@ class PlanStore:
                     "created_at": p.created_at,
                     "submission_notes": p.submission_notes,
                     "rejection_category": p.rejection_category,
-                    "rejection_reason": p.rejection_reason
+                    "rejection_reason": p.rejection_reason,
+                    "scheduling": p.scheduling,
+                    "clarification_questions": p.clarification_questions,
                 }) for p in db_plans
             ]
         finally:

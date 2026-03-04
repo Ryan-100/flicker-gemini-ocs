@@ -9,6 +9,7 @@ class PlanStatus(models.TextChoices):
     REVISED = "Revised", _("Revised")
     APPROVED = "Approved", _("Approved")
     REJECTED = "Rejected", _("Rejected")
+    CONVERTED_TO_PROGRAM = "Converted to Program", _("Converted to Program")
 
 class RejectionCategory(models.TextChoices):
     TECHNICAL = "Technical Infeasibility", _("Technical Infeasibility")
@@ -29,6 +30,7 @@ class SciencePlan(models.Model):
         choices=PlanStatus.choices,
         default=PlanStatus.DRAFT
     )
+    instrument = models.CharField(max_length=100, null=True, blank=True)
     submission_notes = models.TextField(null=True, blank=True)
     rejection_category = models.CharField(
         max_length=100,
@@ -37,6 +39,8 @@ class SciencePlan(models.Model):
         blank=True
     )
     rejection_reason = models.TextField(null=True, blank=True)
+    # Diagram UC-3 15b: Clarification Requested flow
+    clarification_questions = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f"Plan {self.id} - {self.status}"
@@ -76,3 +80,17 @@ class ImageProcessingSpec(models.Model):
     contrast = models.IntegerField(default=50)
     brightness = models.IntegerField(default=50)
     saturation = models.IntegerField(default=50)
+
+# Diagram UC-1 step 15: Add Scheduling Constraints (optional)
+class SchedulingConstraints(models.Model):
+    plan = models.OneToOneField(SciencePlan, on_delete=models.CASCADE, related_name='scheduling', null=True, blank=True)
+    date_start = models.DateField(null=True, blank=True)          # Earliest observation date
+    date_end = models.DateField(null=True, blank=True)            # Latest observation date
+    priority = models.IntegerField(default=1)                     # 1=High, 2=Medium, 3=Low
+    time_window_notes = models.TextField(null=True, blank=True)   # Free-text time window description
+
+    def is_achievable(self):
+        """Check that date range is valid (date_end > date_start)"""
+        if self.date_start and self.date_end:
+            return self.date_end >= self.date_start
+        return True

@@ -19,5 +19,10 @@ export const api = {
     submitPlan: (id, notes) => axios.post(`${API_BASE}/plans/${id}/submit`, { notes }).then(r => r.data),
     validatePlan: (id, approve, category, reason) =>
         axios.post(`${API_BASE}/plans/${id}/validate`, { approve, category, reason }).then(r => r.data),
+    // Diagram UC-3 15b: Request Clarification path
+    requestClarification: (id, questions) =>
+        axios.post(`${API_BASE}/plans/${id}/request_clarification`, { questions }).then(r => r.data),
+    // Diagram UC-3 15b continuation: Astronomer revises plan after clarification
+    revisePlan: (id, planData) =>
+        axios.post(`${API_BASE}/plans/${id}/revise`, planData).then(r => r.data),
 };
-

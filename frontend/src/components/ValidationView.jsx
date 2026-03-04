@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
     CheckCircle, XCircle, ChevronLeft, AlertTriangle,
-    Camera, Target as TargetIcon, Wind, Clock, FileText, CheckCircle2
+    Camera, Target as TargetIcon, Wind, Clock, FileText, CheckCircle2,
+    HelpCircle, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { api } from '../api'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -15,6 +16,20 @@ const REJECTION_CATEGORIES = [
     "Data Specification Issues",
     "Instrument Configuration Problem",
     "Other",
+]
+
+// Diagram UC-3 steps 5-14: ALL validation checks Science Observer must perform
+const VALIDATION_CHECKLIST = [
+    { id: 1, step: 5,  label: 'Target Scientific Validity',          desc: 'Review target information for scientific validity and merit.' },
+    { id: 2, step: 6,  label: 'Target Coordinates & Visibility',     desc: 'Check target coordinates for accuracy and current visibility.' },
+    { id: 3, step: 7,  label: 'Instrument Selection Appropriateness',desc: 'Validate instrument selection is appropriate for this target type.' },
+    { id: 4, step: 8,  label: 'Instrument Configuration Feasibility',desc: 'Verify instrument configuration is technically feasible.' },
+    { id: 5, step: 9,  label: 'Observing Conditions Reasonable',     desc: 'Check that observing conditions requirements are realistic.' },
+    { id: 6, step: 10, label: 'Exposure Settings Achievement',       desc: 'Confirm exposure settings will achieve the stated scientific goals.' },
+    { id: 7, step: 11, label: 'Scheduling Constraints Achievable',   desc: 'Verify scheduling constraints are achievable within telescope schedule.' },
+    { id: 8, step: 12, label: 'Observation Time Justified',          desc: 'Check estimated observation time is scientifically justified.' },
+    { id: 9, step: 13, label: 'Telescope Scheduling Policies',       desc: 'Validate plan against telescope scheduling policies.' },
+    { id: 10, step: 14, label: 'Data Specifications (Gemini Standard)', desc: 'Validate data processing specifications meet Gemini OCS standards.' },
 ]
 
 /* ─── Approval Confirmation Dialog ─── */
@@ -103,6 +118,13 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
     const [reason, setReason] = useState('')
     const [rejectError, setRejectError] = useState('')
     const [validating, setValidating] = useState(false)
+    // Diagram UC-3 steps 5-14: validation checklist tracking
+    const [checkedItems, setCheckedItems] = useState({})
+    const [showChecklist, setShowChecklist] = useState(true)
+    // Diagram UC-3 15b: Request Clarification flow
+    const [isClarifying, setIsClarifying] = useState(false)
+    const [clarificationQuestions, setClarificationQuestions] = useState('')
+    const [clarifyError, setClarifyError] = useState('')
 
     useEffect(() => {
         const fetchPlan = async () => {
@@ -152,6 +174,34 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
         }
     }
 
+    // Diagram UC-3 15b: Request Clarification handler
+    const handleRequestClarification = async () => {
+        if (!clarificationQuestions.trim()) {
+            setClarifyError('Please enter your clarification questions.')
+            return
+        }
+        setClarifyError('')
+        setValidating(true)
+        try {
+            // Diagram UC-3 15b4: send clarification request to Astronomer
+            // Diagram UC-3 15b5: plan status changes to "Clarification Requested"
+            await api.requestClarification(planId, clarificationQuestions)
+            toast.success('Clarification request sent to Astronomer. Plan status updated.')
+            onSuccess()
+        } catch (err) {
+            const msg = err.response?.data?.message || 'Could not send clarification request. Please try again.'
+            toast.error(msg)
+        } finally {
+            setValidating(false)
+        }
+    }
+
+    // Diagram UC-3 steps 5-14: toggle checklist item
+    const toggleCheck = (id) => {
+        setCheckedItems(prev => ({ ...prev, [id]: !prev[id] }))
+    }
+    const allChecked = VALIDATION_CHECKLIST.every(item => checkedItems[item.id])
+
     if (loading) {
         return (
             <div className="max-w-5xl mx-auto space-y-6">
@@ -180,6 +230,7 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
     }
 
     const totalMin = ((plan.exposure.exp_time * plan.exposure.num_exposures) / 60).toFixed(1)
+    const checksCompletedCount = Object.values(checkedItems).filter(Boolean).length
 
     return (
         <>
@@ -223,6 +274,66 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left: Plan Details */}
                     <div className="lg:col-span-2 space-y-6">
+
+                        {/* ── Diagram UC-3 steps 5-14: Validation Checklist ── */}
+                        <div className="bg-slate-900/60 border border-white/5 rounded-2xl overflow-hidden">
+                            <button
+                                onClick={() => setShowChecklist(v => !v)}
+                                className="w-full flex items-center justify-between p-5 hover:bg-white/3 transition"
+                            >
+                                <div className="flex items-center space-x-3">
+                                    <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                                    <span className="text-xs font-bold uppercase tracking-widest text-indigo-400">Validation Checklist</span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                        allChecked ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/40'
+                                                   : 'bg-slate-700/60 text-slate-400 border border-slate-600/50'
+                                    }`}>
+                                        {checksCompletedCount}/{VALIDATION_CHECKLIST.length} checked
+                                    </span>
+                                </div>
+                                {showChecklist ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                            </button>
+                            <AnimatePresence>
+                                {showChecklist && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="px-5 pb-5 space-y-2">
+                                            {VALIDATION_CHECKLIST.map(item => (
+                                                <div
+                                                    key={item.id}
+                                                    onClick={() => toggleCheck(item.id)}
+                                                    className={`flex items-start space-x-3 p-3 rounded-xl cursor-pointer transition ${
+                                                        checkedItems[item.id]
+                                                            ? 'bg-emerald-900/15 border border-emerald-700/30'
+                                                            : 'bg-slate-800/30 border border-white/5 hover:border-indigo-500/20'
+                                                    }`}
+                                                >
+                                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition ${
+                                                        checkedItems[item.id] ? 'bg-emerald-600 border-emerald-500' : 'border-slate-600'
+                                                    }`}>
+                                                        {checkedItems[item.id] && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center space-x-2">
+                                                            <span className={`text-sm font-semibold ${checkedItems[item.id] ? 'text-emerald-300 line-through opacity-70' : 'text-slate-200'}`}>
+                                                                {item.label}
+                                                            </span>
+                                                            <span className="text-[10px] text-slate-600 font-mono">Step {item.step}</span>
+                                                        </div>
+                                                        <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+
                         <SectionCard icon={TargetIcon} title="Target &amp; Conditions" accent="indigo">
                             <div className="grid grid-cols-2 gap-x-8">
                                 <div>
@@ -276,15 +387,54 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
                                 </p>
                             </SectionCard>
                         )}
+
+                        {/* Scheduling Constraints section — shows time_window_notes too */}
+                        {plan.scheduling && (plan.scheduling.date_start || plan.scheduling.date_end || plan.scheduling.time_window_notes) && (
+                            <SectionCard icon={Clock} title="Scheduling Constraints" accent="indigo">
+                                <div className="grid grid-cols-2 gap-x-8">
+                                    <div>
+                                        <DetailRow label="Earliest Date" value={plan.scheduling.date_start || '—'} />
+                                        <DetailRow label="Latest Date"   value={plan.scheduling.date_end   || '—'} />
+                                        <DetailRow label="Priority"      value={`${plan.scheduling.priority === 1 ? '1 — High' : plan.scheduling.priority === 2 ? '2 — Medium' : '3 — Low'}`} />
+                                    </div>
+                                </div>
+                                {plan.scheduling.time_window_notes && (
+                                    <div className="mt-4 bg-slate-900/40 border border-white/5 rounded-xl px-4 py-3">
+                                        <p className="text-[10px] uppercase tracking-widest text-slate-600 font-bold mb-1">Time Window Notes</p>
+                                        <p className="text-slate-300 text-sm leading-relaxed">{plan.scheduling.time_window_notes}</p>
+                                    </div>
+                                )}
+                            </SectionCard>
+                        )}
+
+                        {/* Your Clarification Questions — reference for the observer if plan was previously sent back */}
+                        {plan.clarification_questions && (
+                            <SectionCard icon={HelpCircle} title="Your Clarification Questions (Reference)" accent="violet">
+                                <p className="text-violet-200/90 text-sm leading-relaxed whitespace-pre-wrap bg-violet-900/15 border border-violet-700/20 rounded-xl px-4 py-3">
+                                    {plan.clarification_questions}
+                                </p>
+                            </SectionCard>
+                        )}
                     </div>
 
                     {/* Right: Validation Panel */}
-                    <div>
-                        <div className={`bg-slate-900/60 border rounded-2xl p-6 sticky top-24 transition-all duration-500 ${isRejecting ? 'border-red-500/40' : 'border-emerald-500/30'}`}>
-                            <h2 className="text-base font-bold text-white mb-1">Validation Decision</h2>
-                            <p className="text-slate-500 text-xs mb-6">Review all plan sections before making your decision.</p>
 
-                            {!isRejecting ? (
+                    <div>
+                        <div className={`bg-slate-900/60 border rounded-2xl p-6 sticky top-24 transition-all duration-500 ${
+                            isRejecting ? 'border-red-500/40' : isClarifying ? 'border-violet-500/40' : 'border-emerald-500/30'
+                        }`}>
+                            <h2 className="text-base font-bold text-white mb-1">Validation Decision</h2>
+                            <p className="text-slate-500 text-xs mb-4">Review all plan sections before making your decision.</p>
+
+                            {/* Checklist progress reminder */}
+                            {!allChecked && !isRejecting && !isClarifying && (
+                                <div className="flex items-center space-x-2 bg-slate-800/60 border border-white/5 rounded-xl px-3 py-2.5 mb-4">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    <p className="text-xs text-amber-400/80">{VALIDATION_CHECKLIST.length - checksCompletedCount} checklist item(s) not yet reviewed.</p>
+                                </div>
+                            )}
+
+                            {!isRejecting && !isClarifying ? (
                                 <div className="space-y-3">
                                     <button
                                         onClick={() => setShowApproveConfirm(true)}
@@ -292,6 +442,14 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
                                     >
                                         <CheckCircle className="w-4 h-4" />
                                         <span>Approve Plan</span>
+                                    </button>
+                                    {/* Diagram UC-3 15b: Request Clarification button */}
+                                    <button
+                                        onClick={() => setIsClarifying(true)}
+                                        className="w-full bg-violet-600/10 border border-violet-500/30 text-violet-400 hover:bg-violet-600/20 py-3.5 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-sm"
+                                    >
+                                        <HelpCircle className="w-4 h-4" />
+                                        <span>Request Clarification</span>
                                     </button>
                                     <button
                                         onClick={() => setIsRejecting(true)}
@@ -301,6 +459,56 @@ function ValidationView({ planId, onSuccess, onCancel, toast }) {
                                         <span>Reject Plan</span>
                                     </button>
                                 </div>
+                            ) : isClarifying ? (
+                                // Diagram UC-3 15b: Clarification request form
+                                <motion.div
+                                    initial={{ opacity: 0, x: 10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    className="space-y-5"
+                                >
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Clarification Questions</label>
+                                        <textarea
+                                            rows={6}
+                                            placeholder="Specify what clarification you need from the Astronomer. Be precise about which sections require more detail or correction."
+                                            className={`w-full bg-slate-800/60 border rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 transition resize-none ${
+                                                clarifyError ? 'border-red-500/50 focus:ring-red-500/40' : 'border-violet-500/30 focus:ring-violet-500/40'
+                                            }`}
+                                            value={clarificationQuestions}
+                                            onChange={e => { setClarificationQuestions(e.target.value); if (clarifyError) setClarifyError('') }}
+                                        />
+                                        <AnimatePresence>
+                                            {clarifyError && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                                                    className="mt-2 flex items-start space-x-2 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-3"
+                                                >
+                                                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                                    <p className="text-xs text-red-300 font-medium">{clarifyError}</p>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+                                    <p className="text-xs text-violet-400/70">Plan status will change to "Clarification Requested" and the Astronomer will be notified.</p>
+                                    <div className="grid grid-cols-2 gap-3 pt-2">
+                                        <button
+                                            onClick={() => { setIsClarifying(false); setClarificationQuestions(''); setClarifyError('') }}
+                                            className="py-3 rounded-xl font-bold text-slate-400 bg-white/5 hover:bg-white/10 border border-white/10 transition text-sm"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleRequestClarification}
+                                            disabled={validating}
+                                            className="py-3 rounded-xl font-bold bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/30 transition disabled:opacity-50 text-sm flex items-center justify-center space-x-2"
+                                        >
+                                            {validating
+                                                ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /><span>Sending...</span></>
+                                                : <><HelpCircle className="w-4 h-4" /><span>Send Request</span></>
+                                            }
+                                        </button>
+                                    </div>
+                                </motion.div>
                             ) : (
                                 <motion.div
                                     initial={{ opacity: 0, x: 10 }}

@@ -7,6 +7,7 @@ import PlanForm from './components/PlanForm'
 import Dashboard from './components/Dashboard'
 import ValidationView from './components/ValidationView'
 import Login from './components/Login'
+import TemplateSelector from './components/TemplateSelector'
 
 function AppShell() {
     const toast = useToast()
@@ -15,6 +16,10 @@ function AppShell() {
     const [selectedPlanId, setSelectedPlanId] = useState(null)
     const [plans, setPlans] = useState([])
     const [loading, setLoading] = useState(false)
+    // Diagram UC-1 step 3a: template selection state
+    const [templateValues, setTemplateValues] = useState(null)
+    // Diagram UC-3 15b: plan being revised in response to clarification
+    const [revisingPlan, setRevisingPlan] = useState(null)
 
     const fetchPlans = async () => {
         if (!user) return
@@ -46,12 +51,41 @@ function AppShell() {
     const handleCreateSuccess = () => {
         fetchPlans()
         setView('dashboard')
+        setTemplateValues(null)
         toast.success('Science plan created and saved as Draft.')
+    }
+
+    // Diagram UC-1 step 3a2-3a3: Astronomer selects template → pre-fill form
+    const handleSelectTemplate = (template) => {
+        setTemplateValues(template.values)
+        setView('create')
+        toast.info(`Template "${template.name}" loaded. Fill in target details to continue.`)
+    }
+
+    // Diagram UC-1 graph node: Create from Template? → No path
+    const handleBlankPlan = () => {
+        setTemplateValues(null)
+        setView('create')
     }
 
     const handleValidateClick = (id) => {
         setSelectedPlanId(id)
         setView('validate')
+    }
+
+    // Diagram UC-3 15b: Astronomer opens a Clarification Requested plan to revise it
+    const handleRevisePlan = (plan) => {
+        // Pre-fill the form with the existing plan data
+        setTemplateValues({
+            instrument: plan.instrument,
+            target: plan.target,
+            conditions: plan.conditions,
+            exposure: plan.exposure,
+            data_proc: plan.data_proc,
+            scheduling: plan.scheduling,
+        })
+        setRevisingPlan(plan)  // store the planId so PlanForm uses revisePlan endpoint
+        setView('create')
     }
 
     if (!user) {
@@ -90,8 +124,9 @@ function AppShell() {
 
                             {user.role === 'Astronomer' && (
                                 <button
-                                    onClick={() => setView('create')}
-                                    className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-semibold text-sm transition ${view === 'create' ? 'bg-indigo-600 text-white border border-indigo-500' : 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/20'}`}
+                                    // Diagram UC-1: clicking New Plan shows the Template{Create from Template?} decision
+                                    onClick={() => { setTemplateValues(null); setView('select-template') }}
+                                    className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-semibold text-sm transition ${(view === 'create' || view === 'select-template') ? 'bg-indigo-600 text-white border border-indigo-500' : 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/20'}`}
                                 >
                                     <PlusCircle className="w-4 h-4" />
                                     <span>New Plan</span>
@@ -146,9 +181,27 @@ function AppShell() {
                                 plans={plans}
                                 onRefresh={fetchPlans}
                                 onValidate={handleValidateClick}
+                                onRevisePlan={handleRevisePlan}
                                 loading={loading}
                                 userRole={user.role}
                                 toast={toast}
+                            />
+                        </motion.div>
+                    )}
+
+                    {/* Diagram UC-1 step 3a1: Template selection view */}
+                    {view === 'select-template' && (
+                        <motion.div
+                            key="select-template"
+                            initial={{ opacity: 0, scale: 0.97 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.97 }}
+                            transition={{ duration: 0.2 }}
+                        >
+                            <TemplateSelector
+                                onSelectTemplate={handleSelectTemplate}
+                                onBlankPlan={handleBlankPlan}
+                                onCancel={() => setView('dashboard')}
                             />
                         </motion.div>
                     )}
@@ -163,9 +216,13 @@ function AppShell() {
                         >
                             <PlanForm
                                 astronomerId={user.username}
-                                onSuccess={handleCreateSuccess}
-                                onCancel={() => setView('dashboard')}
+                                onSuccess={() => { setRevisingPlan(null); handleCreateSuccess() }}
+                                onCancel={() => { setRevisingPlan(null); setView(revisingPlan ? 'dashboard' : 'select-template') }}
                                 toast={toast}
+                                // Diagram UC-1 step 3a3: pre-fill form with template values
+                                initialValues={templateValues}
+                                // Diagram UC-3 15b: if revising, use revisePlan endpoint
+                                revisePlanId={revisingPlan?.id || null}
                             />
                         </motion.div>
                     )}

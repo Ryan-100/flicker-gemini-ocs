@@ -3,16 +3,19 @@ import { api } from '../api'
 import {
     Send, CheckCircle2, XCircle, Clock, FileEdit,
     ClipboardList, RefreshCw, ChevronRight, X, Inbox,
-    AlertTriangle, Eye, CheckCircle, Target, Camera, Wind
+    AlertTriangle, Eye, CheckCircle, Target, Camera, Wind,
+    Telescope, Zap, Calendar, HelpCircle, MessageSquare
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const STATUS_META = {
-    Draft:     { color: 'text-slate-300 bg-slate-700/60 border-slate-600/50',  icon: <FileEdit   className="w-3 h-3" /> },
-    Submitted: { color: 'text-sky-300  bg-sky-900/40   border-sky-700/40',    icon: <Clock      className="w-3 h-3" /> },
-    Approved:  { color: 'text-emerald-300 bg-emerald-900/40 border-emerald-700/40', icon: <CheckCircle2 className="w-3 h-3" /> },
-    Rejected:  { color: 'text-red-300  bg-red-900/40   border-red-700/40',    icon: <XCircle    className="w-3 h-3" /> },
-    Revised:   { color: 'text-amber-300 bg-amber-900/40 border-amber-700/40', icon: <RefreshCw  className="w-3 h-3" /> },
+    Draft:                  { color: 'text-slate-300 bg-slate-700/60 border-slate-600/50',  icon: <FileEdit   className="w-3 h-3" /> },
+    Submitted:              { color: 'text-sky-300  bg-sky-900/40   border-sky-700/40',    icon: <Clock      className="w-3 h-3" /> },
+    Approved:               { color: 'text-emerald-300 bg-emerald-900/40 border-emerald-700/40', icon: <CheckCircle2 className="w-3 h-3" /> },
+    Rejected:               { color: 'text-red-300  bg-red-900/40   border-red-700/40',    icon: <XCircle    className="w-3 h-3" /> },
+    Revised:                { color: 'text-amber-300 bg-amber-900/40 border-amber-700/40', icon: <RefreshCw  className="w-3 h-3" /> },
+    // Diagram UC-3 15b: Clarification Requested status
+    'Clarification Requested': { color: 'text-violet-300 bg-violet-900/40 border-violet-700/40', icon: <AlertTriangle className="w-3 h-3" /> },
 }
 
 function StatusBadge({ status }) {
@@ -26,10 +29,11 @@ function StatusBadge({ status }) {
 }
 
 /* ─── Plan Detail Modal ─── */
-function PlanDetailModal({ plan, onClose }) {
+function PlanDetailModal({ plan, onClose, onRevisePlan }) {
     const totalMin = ((plan.exposure.exp_time * plan.exposure.num_exposures) / 60).toFixed(1)
     const isRejected = plan.status === 'Rejected'
     const isApproved = plan.status === 'Approved'
+    const isClarification = plan.status === 'Clarification Requested'
 
     return (
         <motion.div
@@ -88,6 +92,37 @@ function PlanDetailModal({ plan, onClose }) {
                                 </p>
                             ) : (
                                 <p className="text-red-400/60 text-sm italic">No detailed reason was provided.</p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── Clarification Requested Banner ── */}
+                    {isClarification && (
+                        <div className="bg-violet-950/60 border border-violet-500/40 rounded-2xl p-6">
+                            <div className="flex items-center space-x-3 mb-4">
+                                <div className="w-10 h-10 rounded-full bg-violet-500/15 border border-violet-500/30 flex items-center justify-center shrink-0">
+                                    <HelpCircle className="w-5 h-5 text-violet-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-violet-300 font-bold text-base">Clarification Requested</h3>
+                                    <p className="text-violet-400/60 text-xs mt-0.5">The Science Observer has questions about your plan.</p>
+                                </div>
+                            </div>
+                            {plan.clarification_questions ? (
+                                <p className="text-violet-200/90 text-sm leading-relaxed bg-violet-900/20 rounded-xl px-4 py-3 border border-violet-800/30 whitespace-pre-wrap">
+                                    {plan.clarification_questions}
+                                </p>
+                            ) : (
+                                <p className="text-violet-400/60 text-sm italic">No specific questions were provided.</p>
+                            )}
+                            {onRevisePlan && (
+                                <button
+                                    onClick={() => { onClose(); onRevisePlan(plan) }}
+                                    className="mt-4 w-full py-3 rounded-xl font-bold bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center space-x-2 transition text-sm shadow-lg shadow-violet-900/30"
+                                >
+                                    <MessageSquare className="w-4 h-4" />
+                                    <span>Revise Plan</span>
+                                </button>
                             )}
                         </div>
                     )}
@@ -152,6 +187,33 @@ function PlanDetailModal({ plan, onClose }) {
                         </div>
                     </div>
 
+                    {/* ── Scheduling Constraints ── */}
+                    {plan.scheduling && (plan.scheduling.date_start || plan.scheduling.date_end || plan.scheduling.time_window_notes) && (
+                        <div className="bg-slate-800/40 border border-white/5 rounded-2xl p-5">
+                            <h4 className="flex items-center space-x-2 text-xs font-bold uppercase tracking-widest text-violet-400 mb-4">
+                                <Calendar className="w-4 h-4" /><span>Scheduling Constraints</span>
+                            </h4>
+                            <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+                                {[
+                                    ['Earliest Date', plan.scheduling.date_start || '—'],
+                                    ['Latest Date',   plan.scheduling.date_end   || '—'],
+                                    ['Priority',      plan.scheduling.priority === 1 ? '1 — High' : plan.scheduling.priority === 2 ? '2 — Medium' : '3 — Low'],
+                                ].map(([label, val]) => (
+                                    <div key={label} className="flex justify-between items-center py-1.5 border-b border-white/5 last:border-0">
+                                        <span className="text-slate-500 text-xs">{label}</span>
+                                        <span className="text-slate-200 text-xs font-semibold font-mono">{val}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            {plan.scheduling.time_window_notes && (
+                                <div className="mt-3 bg-slate-900/40 border border-white/5 rounded-xl px-4 py-3">
+                                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-bold mb-1">Time Window Notes</p>
+                                    <p className="text-slate-300 text-sm leading-relaxed">{plan.scheduling.time_window_notes}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ── Submission Notes ── */}
                     {plan.submission_notes && (
                         <div className="bg-amber-900/10 border border-amber-500/20 rounded-2xl px-5 py-4">
@@ -175,6 +237,118 @@ function PlanDetailModal({ plan, onClose }) {
 }
 
 /* ─── Submit Confirmation Modal ─── */
+/* ─── Virtual Telescope Test Dialog (Diagram UC-2 step 6a) ─── */
+function VirtualTelescopeModal({ plan, onClose, onProceedToSubmit }) {
+    const [testing, setTesting] = useState(false)
+    const [result, setResult] = useState(null)
+
+    const runTest = () => {
+        setTesting(true)
+        // Simulate VT test (in production: api.testVirtualTelescope(plan.id))
+        setTimeout(() => {
+            // Diagram UC-2 step 6a3: Virtual Telescope validates logical correctness and feasibility
+            const totalSec = plan.exposure.exp_time * plan.exposure.num_exposures
+            const issues = []
+            if (totalSec > 7200) issues.push('Observation duration exceeds 2-hour VT policy limit.')
+            if (plan.conditions.seeing > 2.5) issues.push('Seeing requirement exceeds instrument sensitivity threshold.')
+            setResult({ issues, passed: issues.length === 0 })
+            setTesting(false)
+        }, 1500)
+    }
+
+    return (
+        <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <motion.div
+                initial={{ scale: 0.92, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 20 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                className="bg-slate-900 border border-white/10 rounded-3xl p-8 w-full max-w-md shadow-2xl"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-start justify-between mb-6">
+                    <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-sky-600/20 border border-sky-500/30 rounded-xl">
+                            <Telescope className="w-5 h-5 text-sky-400" />
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-white">Virtual Telescope Test</h3>
+                            <p className="text-slate-400 text-sm mt-0.5">Plan: <span className="font-semibold text-slate-200">{plan.target.name}</span></p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition"><X className="w-5 h-5" /></button>
+                </div>
+
+                {!result ? (
+                    <>
+                        <p className="text-slate-400 text-sm mb-6">
+                            The Virtual Telescope simulates your plan to check logical correctness and feasibility before submission.
+                            This step is optional but recommended.
+                        </p>
+                        <button
+                            onClick={runTest}
+                            disabled={testing}
+                            className="w-full py-3.5 rounded-xl font-bold bg-sky-600 hover:bg-sky-500 text-white flex items-center justify-center space-x-2 transition disabled:opacity-50"
+                        >
+                            {testing
+                                ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /><span>Running simulation...</span></>
+                                : <><Zap className="w-4 h-4" /><span>Run VT Simulation</span></>
+                            }
+                        </button>
+                    </>
+                ) : (
+                    // Diagram UC-2 step 6a4: System displays test results
+                    <>
+                        <div className={`rounded-2xl p-5 mb-6 ${
+                            result.passed
+                                ? 'bg-emerald-950/60 border border-emerald-500/30'
+                                : 'bg-amber-950/60 border border-amber-500/30'
+                        }`}>
+                            <div className="flex items-center space-x-3 mb-3">
+                                {result.passed
+                                    ? <CheckCircle className="w-6 h-6 text-emerald-400" />
+                                    : <AlertTriangle className="w-6 h-6 text-amber-400" />
+                                }
+                                <h4 className={`font-bold ${result.passed ? 'text-emerald-300' : 'text-amber-300'}`}>
+                                    {result.passed ? 'All VT Checks Passed' : 'Issues Detected'}
+                                </h4>
+                            </div>
+                            {result.issues.length > 0 && (
+                                <ul className="space-y-2">
+                                    {result.issues.map((issue, i) => (
+                                        <li key={i} className="text-amber-200/80 text-sm flex items-start space-x-2">
+                                            <span className="text-amber-400 shrink-0">•</span>
+                                            <span>{issue}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {result.passed && (
+                                <p className="text-emerald-200/80 text-sm">Feasibility validated. No issues found. Safe to submit.</p>
+                            )}
+                        </div>
+                        <div className="flex space-x-3">
+                            {/* Diagram UC-2 step 6a5: If issues found, astronomer can edit before submission */}
+                            <button onClick={onClose} className="flex-1 py-3 rounded-xl font-bold text-slate-400 bg-white/5 hover:bg-white/10 border border-white/10 transition text-sm">
+                                {result.passed ? 'Close' : 'Edit Plan'}
+                            </button>
+                            {/* Diagram UC-2 step 6a6: Continue to submission */}
+                            <button
+                                onClick={() => { onClose(); onProceedToSubmit(plan) }}
+                                className="flex-1 py-3 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition text-sm flex items-center justify-center space-x-2"
+                            >
+                                <Send className="w-4 h-4" /><span>Proceed to Submit</span>
+                            </button>
+                        </div>
+                    </>
+                )}
+            </motion.div>
+        </motion.div>
+    )
+}
+
 function SubmitModal({ plan, onConfirm, onCancel, submitting }) {
     const [notes, setNotes] = useState('')
     return (
@@ -245,10 +419,12 @@ function SubmitModal({ plan, onConfirm, onCancel, submitting }) {
     )
 }
 
-function Dashboard({ plans, onRefresh, onValidate, loading, userRole, toast }) {
+function Dashboard({ plans, onRefresh, onValidate, onRevisePlan, loading, userRole, toast }) {
     const [pendingSubmit, setPendingSubmit] = useState(null)
     const [submitting, setSubmitting] = useState(false)
     const [detailPlan, setDetailPlan] = useState(null)
+    // Diagram UC-2 step 6a: Virtual Telescope test
+    const [vtTestPlan, setVtTestPlan] = useState(null)
 
     const handleSubmitPlan = async (plan) => {
         setPendingSubmit(plan)
@@ -291,6 +467,15 @@ function Dashboard({ plans, onRefresh, onValidate, loading, userRole, toast }) {
                     <PlanDetailModal
                         plan={detailPlan}
                         onClose={() => setDetailPlan(null)}
+                        onRevisePlan={onRevisePlan}
+                    />
+                )}
+                {/* Diagram UC-2 step 6a: Virtual Telescope test modal */}
+                {vtTestPlan && (
+                    <VirtualTelescopeModal
+                        plan={vtTestPlan}
+                        onClose={() => setVtTestPlan(null)}
+                        onProceedToSubmit={(plan) => { setVtTestPlan(null); setPendingSubmit(plan) }}
                     />
                 )}
             </AnimatePresence>
@@ -391,13 +576,24 @@ function Dashboard({ plans, onRefresh, onValidate, loading, userRole, toast }) {
 
                                 {/* Role-gated action buttons */}
                                 {userRole === 'Astronomer' && (plan.status === 'Draft' || plan.status === 'Revised') && (
-                                    <button
-                                        onClick={e => { e.stopPropagation(); handleSubmitPlan(plan) }}
-                                        className="w-full py-3 rounded-xl font-bold flex justify-center items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 transition"
-                                    >
-                                        <Send className="w-4 h-4" />
-                                        <span>Submit for Review</span>
-                                    </button>
+                                    <div className="space-y-2">
+                                        {/* Diagram UC-2 step 6a: Test with Virtual Telescope (optional) */}
+                                        <button
+                                            onClick={e => { e.stopPropagation(); setVtTestPlan(plan) }}
+                                            className="w-full py-2.5 rounded-xl font-bold flex justify-center items-center space-x-2 bg-sky-600/10 text-sky-400 border border-sky-500/20 hover:bg-sky-600/20 transition text-sm"
+                                        >
+                                            <Telescope className="w-4 h-4" />
+                                            <span>Test with Virtual Telescope</span>
+                                        </button>
+                                        {/* Diagram UC-2 step 7: Submit for Validation */}
+                                        <button
+                                            onClick={e => { e.stopPropagation(); setPendingSubmit(plan) }}
+                                            className="w-full py-3 rounded-xl font-bold flex justify-center items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 transition"
+                                        >
+                                            <Send className="w-4 h-4" />
+                                            <span>Submit for Review</span>
+                                        </button>
+                                    </div>
                                 )}
 
                                 {userRole === 'Science Observer' && plan.status === 'Submitted' && (
@@ -407,6 +603,17 @@ function Dashboard({ plans, onRefresh, onValidate, loading, userRole, toast }) {
                                     >
                                         <ChevronRight className="w-4 h-4" />
                                         <span>Review &amp; Validate</span>
+                                    </button>
+                                )}
+
+                                {/* Clarification Requested — astronomer must respond */}
+                                {userRole === 'Astronomer' && plan.status === 'Clarification Requested' && (
+                                    <button
+                                        onClick={e => { e.stopPropagation(); setDetailPlan(plan) }}
+                                        className="w-full py-2.5 rounded-xl font-bold flex justify-center items-center space-x-2 text-violet-400 border border-violet-700/40 bg-violet-900/10 hover:bg-violet-900/20 transition text-sm"
+                                    >
+                                        <HelpCircle className="w-4 h-4" />
+                                        <span>View Clarification Questions</span>
                                     </button>
                                 )}
 
